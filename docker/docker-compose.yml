@@ -1,0 +1,75 @@
+# MISP deployment skeleton.
+#
+# Reference topology only. It is the shape described in the case study, written
+# fresh against the public MISP images: server, database, cache. No employer
+# configuration is reproduced here.
+#
+# What this gives you is the property that mattered in practice, which was not
+# speed. It was repeatability: a clean instance in minutes, and a rollback that
+# is `down` followed by `up` rather than a conversation with whoever built it.
+#
+# Before running anything: copy .env.example to .env and change every value.
+# The defaults below are deliberately non-functional placeholders.
+
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?set in .env}
+      MYSQL_USER: ${MYSQL_USER:?set in .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set in .env}
+    volumes:
+      - db_data:/var/lib/mysql
+    # Not published to the host. The database is reachable from the compose
+    # network only, which is the difference between an internal service and an
+    # internet-facing one.
+    expose:
+      - "3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  misp:
+    image: ghcr.io/misp/misp-docker/misp-core:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      BASE_URL: ${BASE_URL:?set in .env}
+      MYSQL_HOST: db
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_FQDN: redis
+    ports:
+      # Bound to loopback. Put a reverse proxy with TLS in front before this
+      # is reachable from anywhere else.
+      - "127.0.0.1:8080:80"
+    volumes:
+      - misp_config:/var/www/MISP/app/Config
+      - misp_files:/var/www/MISP/app/files
+      - misp_logs:/var/www/MISP/app/tmp/logs
+
+volumes:
+  db_data:
+  misp_config:
+  misp_files:
+  misp_logs:

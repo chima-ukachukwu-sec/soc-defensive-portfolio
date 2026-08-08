@@ -1,0 +1,88 @@
+# Community threat feeds, and what each one needs doing to it.
+#
+# Every feed has its own schema, its own rate limit and its own reliability
+# profile. That variation is the actual work in a threat-intel pipeline, so it
+# lives here as configuration rather than as branches in the ingest code.
+#
+# All sources below are public. Nothing here came from a client environment.
+#
+# reliability is an operator judgement on a 0-100 scale, used to set the
+# confidence written to MISP and to decide what auto-ingests versus what waits
+# for an analyst. It is a starting position, not a measurement. Revise it from
+# your own false-positive experience.
+
+version: 1
+
+sources:
+  - id: urlhaus
+    name: "abuse.ch URLhaus"
+    url: "https://urlhaus.abuse.ch/downloads/csv_recent/"
+    format: csv
+    comment_prefix: "#"
+    reliability: 85
+    tags: ["tlp:clear", "source:urlhaus", "type:malware-url"]
+    # URLhaus publishes headerless CSV; columns are positional.
+    columns: [id, dateadded, url, url_status, last_online, threat, tags, urlhaus_link, reporter]
+    indicator_field: url
+    indicator_type: url
+    # Offline URLs are historical rather than actionable. Ingesting them is how
+    # you fill a SIEM with indicators that will never fire.
+    filter:
+      field: url_status
+      equals: online
+
+  - id: threatfox
+    name: "abuse.ch ThreatFox"
+    url: "https://threatfox-api.abuse.ch/api/v1/"
+    format: json
+    json_root: data
+    reliability: 80
+    # abuse.ch moved this endpoint behind an auth key. Verified: an anonymous
+    # GET returns 401. Configured but skipped unless the key is present, so a
+    # clone runs clean rather than reporting a failure the operator cannot fix.
+    auth:
+      type: header
+      header: Auth-Key
+      env: ABUSECH_API_KEY
+    tags: ["tlp:clear", "source:threatfox"]
+    indicator_field: ioc
+    indicator_type_field: ioc_type
+    context_fields: [malware_printable, confidence_level, first_seen]
+
+  - id: circl-osint
+    name: "CIRCL OSINT feed"
+    url: "https://www.circl.lu/doc/misp/feed-osint/"
+    format: misp_feed
+    reliability: 90
+    tags: ["tlp:clear", "source:circl"]
+
+  - id: feodo
+    name: "abuse.ch Feodo Tracker"
+    url: "https://feodotracker.abuse.ch/downloads/ipblocklist.csv"
+    format: csv
+    comment_prefix: "#"
+    reliability: 88
+    tags: ["tlp:clear", "source:feodotracker", "type:c2"]
+    columns: [first_seen_utc, dst_ip, dst_port, c2_status, last_online, malware]
+    indicator_field: dst_ip
+    indicator_type: ip-dst
+    filter:
+      field: c2_status
+      equals: online
+
+  # Requires an API key. Left configured but disabled so a clone runs without
+  # credentials, and so nobody is tempted to commit one.
+  - id: otx
+    name: "AlienVault OTX"
+    url: "https://otx.alienvault.com/api/v1/pulses/subscribed"
+    format: json
+    json_root: results
+    reliability: 70
+    enabled: false
+    auth:
+      type: header
+      header: X-OTX-API-KEY
+      env: OTX_API_KEY
+    tags: ["tlp:clear", "source:otx"]
+    indicator_field: indicator
+    indicator_type_field: type
